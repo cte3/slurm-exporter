@@ -71,7 +71,7 @@ func (c *accountCollector) Collect(ch chan<- prometheus.Metric) {
 
 	metrics, err := c.getAccountMetrics(ctx)
 	if err != nil {
-		logger.Error(err, "failed to collect account metrics")
+		logger.Error(err, "failed to collect account metrics; API is unreachable and no cached data is available")
 		return
 	}
 

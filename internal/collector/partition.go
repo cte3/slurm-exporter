@@ -112,7 +112,7 @@ func (c *partitionCollector) Collect(ch chan<- prometheus.Metric) {
 
 	metrics, err := c.getPartitionMetrics(ctx)
 	if err != nil {
-		logger.Error(err, "failed to collect partition metrics")
+		logger.Error(err, "failed to collect partition metrics; API is unreachable and no cached data is available")
 		return
 	}
 

@@ -72,7 +72,7 @@ func (c *userCollector) Collect(ch chan<- prometheus.Metric) {
 
 	metrics, err := c.getUserMetrics(ctx)
 	if err != nil {
-		logger.Error(err, "failed to collect user metrics")
+		logger.Error(err, "failed to collect user metrics; API is unreachable and no cached data is available")
 		return
 	}
 

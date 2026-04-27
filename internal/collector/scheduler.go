@@ -5,6 +5,7 @@ package collector
 
 import (
 	"context"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/ptr"
@@ -179,7 +180,7 @@ func (c *schedulerCollector) Collect(ch chan<- prometheus.Metric) {
 
 	metrics, err := c.getSchedulerMetrics(ctx)
 	if err != nil {
-		logger.Error(err, "failed to collect scheduler metrics")
+		logger.Error(err, "failed to collect scheduler metrics; API is unreachable and no cached data is available")
 		return
 	}
 
@@ -255,6 +256,13 @@ func (c *schedulerCollector) Collect(ch chan<- prometheus.Metric) {
 func (c *schedulerCollector) getSchedulerMetrics(ctx context.Context) (*SchedulerMetrics, error) {
 	statsList := &types.V0043StatsList{}
 	if err := c.slurmClient.List(ctx, statsList); err != nil {
+		if strings.Contains(err.Error(), "json: cannot unmarshal number") {
+			logger := log.FromContext(ctx).WithName("SchedulerCollector")
+			logger.Info("Warning: Scheduler stats exceeded 32-bit integer limits. " +
+				"Skipping scheduler metrics until Slurm stats are reset or library is patched.")
+			// Return empty metrics and nil error to satisfy the caller without crashing
+			return &SchedulerMetrics{}, nil
+		}
 		return nil, err
 	}
 	metrics := calculateSchedulerMetrics(statsList)

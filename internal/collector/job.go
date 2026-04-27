@@ -102,7 +102,7 @@ func (c *jobCollector) Collect(ch chan<- prometheus.Metric) {
 
 	metrics, err := c.getJobMetrics(ctx)
 	if err != nil {
-		logger.Error(err, "failed to collect job metrics")
+		logger.Error(err, "failed to collect job metrics; API is unreachable and no cached data is available")
 		return
 	}
 

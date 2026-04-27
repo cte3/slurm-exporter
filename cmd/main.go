@@ -26,9 +26,10 @@ var (
 
 // Input flags to the command
 type Flags struct {
-	MetricsAddr string
-	Server      string
-	CacheFreq   time.Duration
+	MetricsAddr   string
+	Server        string
+	NodeCacheFreq time.Duration
+	JobCacheFreq  time.Duration
 }
 
 func parseFlags(flags *Flags) {
@@ -45,10 +46,16 @@ func parseFlags(flags *Flags) {
 		"The server url of the cluster for the exporter to monitor.",
 	)
 	flag.DurationVar(
-		&flags.CacheFreq,
-		"cache-freq",
-		5*time.Second,
-		"The amount of time to wait between updating the slurm restapi cache. Must be greater than 1s and must be parsable by time.ParseDuration.",
+		&flags.NodeCacheFreq,
+		"node-cache-freq",
+		10*time.Second,
+		"Sync frequency for Nodes and Partitions.",
+	)
+	flag.DurationVar(
+		&flags.JobCacheFreq,
+		"job-cache-freq",
+		60*time.Second,
+		"Sync frequency for Jobs (heavy request).",
 	)
 	flag.Parse()
 }
@@ -63,12 +70,29 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 	setupLog.Info("With", "Flags", flags)
 
-	slurmClient, err := client.NewSlurmClient(flags.Server, flags.CacheFreq)
+	// Set up a context that responds to SIGINT/SIGTERM
+	ctx := ctrl.SetupSignalHandler()
+
+	slurmClient, err := client.NewSlurmClient(flags.Server, flags.NodeCacheFreq, flags.JobCacheFreq)
 	if err != nil {
 		setupLog.Error(err, "could not create slurm client")
 		os.Exit(1)
 	}
 
+	// 2. Initialize and register the health metric.
+	apiHealth := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "slurm_exporter_api_healthy",
+		Help: "1 if Slurm REST API is reachable and responding, 0 otherwise",
+	})
+	prometheus.MustRegister(apiHealth)
+	slurmClient.SetHealthMetric(apiHealth)
+
+	// 3. Start the refresh loop in the background.
+	// This manages the underlying Slinky cache and updates apiHealth.
+	go slurmClient.RunRefreshLoop(ctx)
+
+	// 4. Initialize collectors.
+	// They receive our slurmClient wrapper which implements the client.Client interface.
 	collectors := []prometheus.Collector{
 		collector.NewSchedulerCollector(slurmClient),
 		collector.NewNodeCollector(slurmClient),

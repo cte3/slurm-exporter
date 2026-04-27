@@ -109,7 +109,7 @@ func (c *nodeCollector) Collect(ch chan<- prometheus.Metric) {
 
 	metrics, err := c.getNodeMetrics(ctx)
 	if err != nil {
-		logger.Error(err, "failed to collect node metrics")
+		logger.Error(err, "failed to collect node metrics; API is unreachable and no cached data is available")
 		return
 	}
 
