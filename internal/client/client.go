@@ -117,11 +117,11 @@ func (c *SlurmClient) List(ctx context.Context, list object.ObjectList, opts ...
 			return errors.New("job cache refresh already in progress; serving stale data")
 		}
 		defer jobQueryLock.Unlock()
-	} else {
-		c.Lock()
-		defer c.Unlock()
+		return c.client.List(ctx, list, opts...)
 	}
 
+	c.Lock()
+	defer c.Unlock()
 	return c.client.List(ctx, list, opts...)
 }
 
