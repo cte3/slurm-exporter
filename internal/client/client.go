@@ -111,10 +111,17 @@ func (c *SlurmClient) RunRefreshLoop(ctx context.Context) {
 var jobQueryLock sync.Mutex
 
 func (c *SlurmClient) List(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
+	// Check if we are dealing with the heavy Job list
 	if _, ok := list.(*types.V0043JobInfoList); ok {
-		jobQueryLock.Lock()
+		if !jobQueryLock.TryLock() {
+			return errors.New("job cache refresh already in progress; serving stale data")
+		}
 		defer jobQueryLock.Unlock()
+	} else {
+		c.Lock()
+		defer c.Unlock()
 	}
+
 	return c.client.List(ctx, list, opts...)
 }
 
