@@ -50,7 +50,6 @@ func NewSlurmClient(server string, nodeFreq time.Duration, jobFreq time.Duration
 
 	clientOptions := client.ClientOptions{
 		EnableFor: []object.Object{
-			&types.V0043JobInfo{},
 			&types.V0043Node{},
 			&types.V0043PartitionInfo{},
 		},
