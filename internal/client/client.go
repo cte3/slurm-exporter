@@ -6,7 +6,6 @@ package client
 import (
 	"context"
 	"errors"
-	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -27,6 +26,11 @@ type SlurmClient struct {
 	nodeCacheFreq time.Duration
 	jobCacheFreq  time.Duration
 	initialized   bool
+
+	jobMu    sync.RWMutex
+	jobCache *types.V0043JobInfoList
+	jobOnce  sync.Once
+	jobReady chan struct{} // closed after the first successful job cache fill
 }
 
 func NewSlurmClient(server string, nodeFreq time.Duration, jobFreq time.Duration) (*SlurmClient, error) {
@@ -39,14 +43,9 @@ func NewSlurmClient(server string, nodeFreq time.Duration, jobFreq time.Duration
 		return nil, errors.New("cache frequencies must be >= 1s")
 	}
 
-	customHTTPClient := &http.Client{
-		Timeout: 5 * time.Minute,
-	}
-
 	config := &client.Config{
-		Server:     server,
-		AuthToken:  token,
-		HTTPClient: customHTTPClient,
+		Server:    server,
+		AuthToken: token,
 	}
 
 	clientOptions := client.ClientOptions{
@@ -69,6 +68,7 @@ func NewSlurmClient(server string, nodeFreq time.Duration, jobFreq time.Duration
 		token:         token,
 		nodeCacheFreq: nodeFreq,
 		jobCacheFreq:  jobFreq,
+		jobReady:      make(chan struct{}),
 	}, nil
 }
 
@@ -79,45 +79,92 @@ func (c *SlurmClient) SetHealthMetric(gauge prometheus.Gauge) {
 func (c *SlurmClient) RunRefreshLoop(ctx context.Context) {
 	logger := log.FromContext(ctx).WithName("SlurmClient")
 	go c.client.Start(ctx)
+	go c.runJobRefreshLoop(ctx)
 
-	ticker := time.NewTicker(c.nodeCacheFreq)
-	defer ticker.Stop()
+	backoff := time.Second
 
 	for {
 		err := c.client.List(ctx, &types.V0043NodeList{})
 		if err != nil {
-			logger.Error(err, "Slurm REST API is unreachable, serving cached metrics")
+			logger.Error(err, "Slurm REST API is unreachable, serving cached metrics", "retry_in", backoff)
 			if c.apiHealthy != nil {
 				c.apiHealthy.Set(0)
 			}
-		} else {
-			if c.apiHealthy != nil {
-				c.apiHealthy.Set(1)
+			delay := backoff
+			backoff = min(backoff*2, c.nodeCacheFreq)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
 			}
-			c.Lock()
-			c.initialized = true
-			c.Unlock()
+			continue
 		}
+
+		if c.apiHealthy != nil {
+			c.apiHealthy.Set(1)
+		}
+		c.Lock()
+		c.initialized = true
+		c.Unlock()
+		backoff = time.Second
 
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(c.nodeCacheFreq):
+		}
+	}
+}
+
+// runJobRefreshLoop proactively refreshes the job list cache at jobCacheFreq,
+// backing off exponentially on API failures so collectors always read from
+// a local copy instead of competing for a live API call.
+func (c *SlurmClient) runJobRefreshLoop(ctx context.Context) {
+	logger := log.FromContext(ctx).WithName("SlurmClient")
+	backoff := time.Second
+
+	for {
+		jobList := &types.V0043JobInfoList{}
+		err := c.client.List(ctx, jobList)
+		if err != nil {
+			logger.Error(err, "Failed to refresh job cache, will retry", "retry_in", backoff)
+			delay := backoff
+			backoff = min(backoff*2, c.jobCacheFreq)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+			continue
+		}
+
+		c.jobMu.Lock()
+		c.jobCache = jobList
+		c.jobMu.Unlock()
+		c.jobOnce.Do(func() { close(c.jobReady) })
+		backoff = time.Second
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(c.jobCacheFreq):
 		}
 	}
 }
 
 // --- client.Client Interface implementation ---
-var jobQueryLock sync.Mutex
 
 func (c *SlurmClient) List(ctx context.Context, list object.ObjectList, opts ...client.ListOption) error {
-	// Check if we are dealing with the heavy Job list
-	if _, ok := list.(*types.V0043JobInfoList); ok {
-		if !jobQueryLock.TryLock() {
-			return errors.New("job cache refresh already in progress; serving stale data")
+	if jobList, ok := list.(*types.V0043JobInfoList); ok {
+		select {
+		case <-c.jobReady:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		defer jobQueryLock.Unlock()
-		return c.client.List(ctx, list, opts...)
+		c.jobMu.RLock()
+		*jobList = *c.jobCache
+		c.jobMu.RUnlock()
+		return nil
 	}
 
 	c.Lock()
@@ -171,7 +218,6 @@ func (c *SlurmClient) Start(ctx context.Context) {
 	// Managed via RunRefreshLoop
 }
 
-// FIX: Added Stop() to satisfy the final interface requirement
 func (c *SlurmClient) Stop() {
 	c.client.Stop()
 }

@@ -5,7 +5,6 @@ package collector
 
 import (
 	"context"
-	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/utils/ptr"
@@ -19,8 +18,7 @@ import (
 // Ref: https://prometheus.io/docs/practices/naming/#metric-names
 func NewJobCollector(slurmClient client.Client) prometheus.Collector {
 	return &jobCollector{
-		slurmClient:          slurmClient,
-		lastKnownGoodMetrics: nil,
+		slurmClient: slurmClient,
 
 		JobCount: prometheus.NewDesc("slurm_jobs_total", "Total number of jobs", nil, nil),
 		JobStates: jobStatesCollector{
@@ -57,10 +55,9 @@ func NewJobCollector(slurmClient client.Client) prometheus.Collector {
 type jobCollector struct {
 	slurmClient client.Client
 
-	JobCount             *prometheus.Desc
-	JobStates            jobStatesCollector
-	JobTres              jobTresCollector
-	lastKnownGoodMetrics *JobMetrics
+	JobCount  *prometheus.Desc
+	JobStates jobStatesCollector
+	JobTres   jobTresCollector
 }
 
 type jobStatesCollector struct {
@@ -135,26 +132,10 @@ func (c *jobCollector) Collect(ch chan<- prometheus.Metric) {
 
 func (c *jobCollector) getJobMetrics(ctx context.Context) (*JobMetrics, error) {
 	jobList := &types.V0043JobInfoList{}
-	logger := log.FromContext(ctx)
-
-	err := c.slurmClient.List(ctx, jobList)
-	if err != nil {
-		if strings.Contains(err.Error(), "busy") || strings.Contains(err.Error(), "in progress") {
-			logger.V(1).Info("Slurm API busy, serving cached job metrics")
-
-			if c.lastKnownGoodMetrics != nil {
-				return c.lastKnownGoodMetrics, nil
-			}
-
-			return &JobMetrics{}, nil
-		}
+	if err := c.slurmClient.List(ctx, jobList); err != nil {
 		return nil, err
 	}
-
-	metrics := calculateJobMetrics(jobList)
-	c.lastKnownGoodMetrics = metrics
-
-	return metrics, nil
+	return calculateJobMetrics(jobList), nil
 }
 
 func calculateJobMetrics(jobList *types.V0043JobInfoList) *JobMetrics {

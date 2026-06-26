@@ -64,7 +64,7 @@ func TestNewSlurmClient(t *testing.T) {
 			if err != nil {
 				t.Errorf("Environment could not be set. error=%v", err)
 			}
-			got, err := NewSlurmClient(tt.args.server, tt.args.cacheFreq)
+			got, err := NewSlurmClient(tt.args.server, tt.args.cacheFreq, tt.args.cacheFreq)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("NewSlurmClient() error = %v, wantErr %v", err, tt.wantErr)
 				return
