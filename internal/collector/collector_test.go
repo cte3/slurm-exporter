@@ -197,7 +197,7 @@ var (
 		Partition: ptr.To(strings.Join([]string{partition1Name, partition2Name}, ",")),
 		Hold:      ptr.To(true),
 		NodeCount: &api.V0043Uint32NoValStruct{
-			Number: ptr.To[int32](3),
+			Number: ptr.To[int64](3),
 			Set:    ptr.To(true),
 		},
 		UserId:   ptr.To[int32](0),
@@ -255,7 +255,7 @@ var (
 		JobState:  ptr.To([]api.V0043JobInfoJobState{api.V0043JobInfoJobStatePENDING}),
 		Partition: ptr.To(partition2Name),
 		NodeCount: &api.V0043Uint32NoValStruct{
-			Number: ptr.To[int32](2),
+			Number: ptr.To[int64](2),
 			Set:    ptr.To(true),
 		},
 		UserId: ptr.To[int32](1000),
